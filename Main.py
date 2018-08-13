@@ -6,7 +6,7 @@ import torch.distributed as dist
 import torch.optim
 
 from ImagenetDataLoder import DataLoader
-from ShuffleNetV2 import ShuffleNetV2 as Model
+from MnasNet import MnasNet as Model
 
 import Config
 
