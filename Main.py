@@ -6,7 +6,7 @@ import torch.distributed as dist
 import torch.optim
 
 from ImagenetDataLoder import DataLoader
-from MnasNet import MnasNet as Model
+from ShuffleNetV2 import ShuffleNetV2 as Model
 
 import Config
 
@@ -34,11 +34,11 @@ Mode = Config.Mode
 
 def Main():
 
-    model = Model(in_channels=3,num_classes=1000)
+    model = Model(in_channels=3,num_classes=1000,net_scale=1.0)
 
     model,loss_fn,optimizer = EnvironmentSetup(model)
     
-    model,optimizer = LoadParameters(model,optimizer,PretrainModelPath,False)
+    model,optimizer = LoadParameters(model,optimizer,PretrainModelPath)
     
     train_loader,train_sample = DataLoader(mode='Train')
     val_loader,val_sample = DataLoader(mode='Val')
@@ -51,18 +51,16 @@ def Main():
         _ = validate_or_test(test_loader,model,loss_fn)
         return
     else:
-        pass
-    
-    for epoch in range(StartEpoch,Epoch):
-        if useDistributed:
-            train_sample.set_epoch(epoch)
-        adjust_learning_rate(optimizer,epoch)
-        
-        train(train_loader,model,loss_fn,optimizer,epoch)
-        
-        top1 = validate_or_test(val_loader,model,loss_fn)
-        
-        SaveParameters(model,optimizer,epoch,top1)
+        for epoch in range(StartEpoch,Epoch):
+            if useDistributed:
+                train_sample.set_epoch(epoch)
+            adjust_learning_rate(optimizer,epoch)
+            
+            train(train_loader,model,loss_fn,optimizer,epoch)
+            
+            top1 = validate_or_test(val_loader,model,loss_fn)
+            
+            SaveParameters(model,optimizer,epoch,top1)
 
 def train(train_loader,model,loss_fn,optimizer,epoch):
     losses = AverageMeter()
@@ -136,9 +134,8 @@ def validate_or_test(loader, model, loss_fn):
               .format(top1=top1, top5=top5))
 
     return top1.avg
-def LoadParameters(model,optimizer,path,GPUModel=True):
+def LoadParameters(model,optimizer,path):
     if not os.path.exists(path):
-        #raise ValueError('pretrain model file is not exists...')
         print('pretrain model file is not exists...')
         return model,optimizer
     else:
@@ -147,60 +144,45 @@ def LoadParameters(model,optimizer,path,GPUModel=True):
     net_dict = model.state_dict()
     optimizer_dict = optimizer.state_dict()
     
-    if GPUModel:
-        pretrain = torch.load(path, map_location=lambda storage, loc: storage)
-
-        for k, v in pretrain.items():
-            try:
-                #All model parameters
-                if k=='state_dict':
-                    for keys in v:
-                        net_dict.update( { keys[7:]:v[keys] } )
-                    print('load net state_dict')
-                elif k=='Epoch':
-                    StartEpoch = v
-                    print('load Epoch')
-                elif k=='BestScore':
-                    BestScore = v
-                    print('load BestScore')
-                elif k=='optimizer':
-                    for keys in v:
-                        optimizer_dict.update( { keys[7:]:v[keys] } )
-                    print('load optimizer state_dict')
-                else:
-                    raise ValueError('should load state_dict')
-            except:
-                #Only net state_dict
-                net_dict.update( { k[7:]:v } )
-    else:
-        pretrain = torch.load(path)
-        
-        for k, v in pretrain.items():
-            try:
-                #All model parameters
-                if k=='state_dict':
-                    for keys in v:
-                        net_dict.update( { keys:v[keys] } )
-                    print('load state_dict')
-                elif k=='Epoch':
-                    StartEpoch = v
-                    print('load Epoch')
-                elif k=='BestScore':
-                    BestScore = v
-                    print('load BestScore')
-                elif k=='optimizer':
-                    for keys in v:
-                        optimizer_dict.update( { keys:v[keys] } )
-                    print('load optimizer')
-                else:
-                    raise ValueError('should load state_dict')
-            except:
-                #Only net state_dict
-                net_dict.update( { k:v } )
+    global StartEpoch
+    global BestScore
     
+    try:
+        pretrain = torch.load(path)
+    except:
+        pretrain = torch.load(path, map_location=lambda storage, loc: storage)
+    
+    for k, v in pretrain.items():
+        try:
+            #All model parameters
+            if k=='state_dict':
+                for keys in v:
+                    net_dict.update( { keys:v[keys] } )
+                print('load state_dict')
+            elif k=='Epoch':
+                StartEpoch = v
+                print('load Epoch')
+            elif k=='BestScore':
+                BestScore = v
+                print('load BestScore')
+            elif k=='optimizer':
+                for keys in v:
+                    optimizer_dict.update( { keys:v[keys] } )
+                print('load optimizer')
+            else:
+                raise ValueError('should load state_dict')
+        except:
+            #Only net state_dict
+            net_dict.update( { k:v } )
+    
+    model.load_state_dict(net_dict)
+    optimizer.load_state_dict(optimizer_dict)
     return model,optimizer
 def SaveParameters(model,optimizer,epoch,score,path=os.path.join(ModelPath,'checkpoint.pth'),only_save_state_dict=False):
-    is_best = score>BestScore
+    try:
+        is_best = score.cpu()>BestScore.cpu()
+    except:
+        is_best = score>BestScore
     
     if only_save_state_dict:
         torch.save(model.state_dict(),path)
