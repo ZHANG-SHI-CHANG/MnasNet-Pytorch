@@ -22,15 +22,15 @@ class PrimaryModule(nn.Module):
                                            OrderedDict(
                                                        [
                                                         ('PrimaryBN',nn.BatchNorm2d(in_channels)),
-                                                        ('PrimaryConv3x3',conv3x3(in_channels,out_channels[0],2,1,True,1)),
+                                                        ('PrimaryConv3x3',conv3x3(in_channels,out_channels[0],2,1,False,1)),
                                                         ('PrimaryConv3x3BN',nn.BatchNorm2d(out_channels[0])),
-                                                        ('PrimaryConv3x3ReLU',nn.ReLU()),
-                                                        ('PrimaryDepthwiseConv3x3',conv3x3(out_channels[0],out_channels[0],1,1,True,out_channels[0])),
+                                                        ('PrimaryConv3x3ReLU',nn.ReLU(inplace=True)),
+                                                        ('PrimaryDepthwiseConv3x3',conv3x3(out_channels[0],out_channels[0],1,1,False,out_channels[0])),
                                                         ('PrimaryDepthwiseConv3x3BN',nn.BatchNorm2d(out_channels[0])),
-                                                        ('PrimaryDepthwiseConv3x3ReLU',nn.ReLU()),
-                                                        ('PrimaryConv1x1',conv1x1(out_channels[0],out_channels[1],True,1)),
+                                                        ('PrimaryDepthwiseConv3x3ReLU',nn.ReLU(inplace=True)),
+                                                        ('PrimaryConv1x1',conv1x1(out_channels[0],out_channels[1],False,1)),
                                                         ('PrimaryConv1x1BN',nn.BatchNorm2d(out_channels[1])),
-                                                        ('PrimaryConv1x1ReLU',nn.ReLU())
+                                                        ('PrimaryConv1x1ReLU',nn.ReLU(inplace=True))
                                                        ]
                                                        )
                                            )
@@ -52,15 +52,15 @@ class MnasNetBlock(nn.Module):
         self.MnasNetBlock = nn.Sequential(
                                           OrderedDict(
                                                       [
-                                                       ('unCompressConv1x1',conv1x1(in_channels,out_channels*ratio,True,1)),
+                                                       ('unCompressConv1x1',conv1x1(in_channels,out_channels*ratio,False,1)),
                                                        ('unCompressConv1x1BN',nn.BatchNorm2d(out_channels*ratio)),
-                                                       ('unCompressConv1x1ReLU',nn.ReLU()),
-                                                       ('DepthwiseConv',_conv(out_channels*ratio,out_channels*ratio,stride,padding,True,out_channels*ratio)),
+                                                       ('unCompressConv1x1ReLU',nn.ReLU(inplace=True)),
+                                                       ('DepthwiseConv',_conv(out_channels*ratio,out_channels*ratio,stride,padding,False,out_channels*ratio)),
                                                        ('DepthwiseConvBN',nn.BatchNorm2d(out_channels*ratio)),
-                                                       ('DepthwiseConvReLU',nn.ReLU()),
-                                                       ('CompressConv1x1',conv1x1(out_channels*ratio,out_channels,True,1)),
+                                                       ('DepthwiseConvReLU',nn.ReLU(inplace=True)),
+                                                       ('CompressConv1x1',conv1x1(out_channels*ratio,out_channels,False,1)),
                                                        ('CompressConv1x1BN',nn.BatchNorm2d(out_channels)),
-                                                       ('CompressConv1x1ReLU',nn.ReLU())
+                                                       ('CompressConv1x1ReLU',nn.ReLU(inplace=True))
                                                       ]
                                                       )
                                           )
@@ -79,6 +79,7 @@ class FinalModule(nn.Module):
         self.FC = nn.Sequential(
                                 OrderedDict(
                                             [
+                                             ('Dropout',nn.Dropout(0.5)),
                                              ('FC',conv1x1(in_channels,out_channels,True,1))
                                             ]
                                             )
@@ -106,6 +107,15 @@ class MnasNet(nn.Module):
         self.stage6 = self.stage(6,[0,0],conv3x3,1,6)
         
         self.FC = FinalModule(self.out_channels[-1],num_classes)
+        
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                init.kaiming_uniform_(m.weight)
+                if m.bias is not None:
+                    init.constant_(m.bias, 0.0)
+            elif isinstance(m, nn.BatchNorm2d):
+                init.constant_(m.weight, 1.0)
+                init.constant_(m.bias, 0.0)
     
     def stage(self,stage=1,BlockRepeat=[1,2],_conv=conv3x3,padding=1,ratio=6):
         modules = OrderedDict()
